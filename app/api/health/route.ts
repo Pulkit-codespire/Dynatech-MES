@@ -23,15 +23,16 @@ export async function GET() {
     dbError = e instanceof Error ? e.message : String(e);
   }
 
-  const status = db === "ok" ? 200 : 503;
+  const code = db === "ok" ? 200 : 503;
   return NextResponse.json(
     {
       status: db === "ok" ? "ok" : "degraded",
+      code,
       db,
       db_error: dbError,
       latency_ms: Date.now() - started,
       timestamp: new Date().toISOString(),
     },
-    { status }
+    { status: code }
   );
 }
