@@ -19,6 +19,14 @@ export default function Home() {
           </li>
         </ul>
         <p className="text-neutral-500">All routes require <code>Authorization: Bearer &lt;DEVICE_API_KEY&gt;</code>.</p>
+        <p className="pt-4">
+          <a
+            href="/dashboard"
+            className="inline-block rounded-md bg-neutral-900 px-4 py-2 text-white hover:bg-neutral-800"
+          >
+            Open live dashboard →
+          </a>
+        </p>
       </section>
     </main>
   );
