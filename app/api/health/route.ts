@@ -12,7 +12,7 @@ export async function GET() {
   try {
     const { error } = await supabase()
       .from("events")
-      .select("event_id", { count: "exact", head: true })
+      .select("event_id")
       .limit(1);
     if (error) {
       db = "error";
