@@ -222,10 +222,11 @@ export default function Dashboard() {
         <div className="rounded-md border border-neutral-200 bg-white overflow-hidden">
           <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-neutral-200 bg-neutral-100 text-xs font-semibold uppercase tracking-wider text-neutral-600">
             <div className="col-span-1"></div>
+            <div className="col-span-2">Log time</div>
             <div className="col-span-2">Received</div>
             <div className="col-span-3">Machine</div>
-            <div className="col-span-2">Type</div>
-            <div className="col-span-4">Payload</div>
+            <div className="col-span-1">Type</div>
+            <div className="col-span-3">Payload</div>
           </div>
           <div className="max-h-[520px] overflow-y-auto">
             {data && data.events.length === 0 ? (
@@ -256,10 +257,11 @@ export default function Dashboard() {
                       <div className="col-span-1 text-neutral-400 select-none">
                         {isOpen ? "▾" : "▸"}
                       </div>
-                      <div className="col-span-2 text-neutral-600">{fmtTime(e.received_at)}</div>
+                      <div className="col-span-2 text-neutral-800">{fmtTime(e.timestamp)}</div>
+                      <div className="col-span-2 text-neutral-500">{fmtTime(e.received_at)}</div>
                       <div className="col-span-3 font-semibold">{e.machine_id}</div>
-                      <div className="col-span-2">{e.event_type}</div>
-                      <div className="col-span-4 text-neutral-500 truncate">
+                      <div className="col-span-1">{e.event_type}</div>
+                      <div className="col-span-3 text-neutral-500 truncate">
                         {hasPayload ? JSON.stringify(e.payload) : "—"}
                       </div>
                     </button>

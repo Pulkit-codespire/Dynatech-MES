@@ -13,7 +13,7 @@ export async function GET(req: Request) {
   let q = sb
     .from("events")
     .select("event_id, machine_id, event_type, timestamp, payload, received_at")
-    .order("received_at", { ascending: false })
+    .order("timestamp", { ascending: false })
     .limit(limit);
 
   if (since) q = q.gt("received_at", since);
