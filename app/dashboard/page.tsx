@@ -30,6 +30,22 @@ type DashboardData = {
   events: Event[];
 };
 
+type ImageRow = {
+  id: string;
+  machine_id: string;
+  public_url: string;
+  content_type: string | null;
+  size_bytes: number | null;
+  caption: string | null;
+  uploaded_at: string;
+};
+
+type ImagesData = {
+  status: "ok" | "error";
+  server_time: string;
+  images: ImageRow[];
+};
+
 const POLL_MS = 2000;
 const STALE_MS = 30_000;
 
@@ -53,6 +69,9 @@ export default function Dashboard() {
   const [now, setNow] = useState<number>(Date.now());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [images, setImages] = useState<ImageRow[]>([]);
+  const [lightbox, setLightbox] = useState<ImageRow | null>(null);
+  const [deletingImage, setDeletingImage] = useState<string | null>(null);
   const flashRef = useRef<Set<string>>(new Set());
   const lastIdsRef = useRef<Set<string>>(new Set());
 
@@ -86,12 +105,25 @@ export default function Dashboard() {
         setErr(e instanceof Error ? e.message : String(e));
       }
     }
+    async function tickImages() {
+      try {
+        const r = await fetch("/api/dashboard/images?limit=24", { cache: "no-store" });
+        const j: ImagesData = await r.json();
+        if (cancelled) return;
+        if (j.status === "ok") setImages(j.images);
+      } catch {
+        // silent; image feed is non-critical
+      }
+    }
     tick();
+    tickImages();
     const id = setInterval(tick, POLL_MS);
+    const imgId = setInterval(tickImages, 5000);
     const clockId = setInterval(() => setNow(Date.now()), 1000);
     return () => {
       cancelled = true;
       clearInterval(id);
+      clearInterval(imgId);
       clearInterval(clockId);
     };
   }, []);
@@ -214,6 +246,109 @@ export default function Dashboard() {
           </div>
         )}
       </section>
+
+      <section className="max-w-6xl mx-auto mb-8">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-3">
+          Machine images (latest 24)
+        </h2>
+        {images.length === 0 ? (
+          <div className="rounded-md border border-neutral-200 bg-white px-4 py-8 text-center text-sm text-neutral-500">
+            No images uploaded yet. POST to <code className="font-mono">/api/images</code>.
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            {images.map((img) => (
+              <div
+                key={img.id}
+                className="group relative rounded-md border border-neutral-200 bg-white overflow-hidden aspect-square"
+              >
+                <button
+                  type="button"
+                  onClick={() => setLightbox(img)}
+                  className="block w-full h-full"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={img.public_url}
+                    alt={img.caption ?? img.machine_id}
+                    className="w-full h-full object-cover"
+                  />
+                </button>
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-1 text-[10px] text-white font-mono pointer-events-none">
+                  <div className="truncate">{img.machine_id}</div>
+                  <div className="text-white/70">{fmtAgo(img.uploaded_at, now)}</div>
+                </div>
+                <button
+                  type="button"
+                  disabled={deletingImage === img.id}
+                  onClick={async (ev) => {
+                    ev.stopPropagation();
+                    if (!window.confirm(`Delete this image for "${img.machine_id}"?`)) return;
+                    setDeletingImage(img.id);
+                    try {
+                      const r = await fetch(
+                        `/api/dashboard/images?id=${encodeURIComponent(img.id)}`,
+                        { method: "DELETE" }
+                      );
+                      const j = await r.json();
+                      if (j.status !== "ok") setErr(`Delete failed: ${j.message ?? "unknown"}`);
+                      else setImages((prev) => prev.filter((x) => x.id !== img.id));
+                    } catch (e) {
+                      setErr(e instanceof Error ? e.message : String(e));
+                    } finally {
+                      setDeletingImage(null);
+                    }
+                  }}
+                  className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 bg-black/60 hover:bg-red-600 text-white rounded w-5 h-5 text-xs leading-none flex items-center justify-center transition"
+                  aria-label="Delete image"
+                  title="Delete image"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-6 cursor-zoom-out"
+          onClick={() => setLightbox(null)}
+        >
+          <div
+            className="relative max-w-5xl max-h-full bg-white rounded-md overflow-hidden"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={lightbox.public_url}
+              alt={lightbox.caption ?? lightbox.machine_id}
+              className="max-w-full max-h-[80vh] object-contain"
+            />
+            <div className="px-4 py-3 text-xs font-mono text-neutral-700 border-t border-neutral-200 flex items-center justify-between gap-4">
+              <div>
+                <div className="font-semibold">{lightbox.machine_id}</div>
+                <div className="text-neutral-500">
+                  {new Date(lightbox.uploaded_at).toLocaleString("en-GB", { hour12: false })}
+                  {lightbox.size_bytes ? ` · ${(lightbox.size_bytes / 1024).toFixed(1)} KB` : ""}
+                  {lightbox.content_type ? ` · ${lightbox.content_type}` : ""}
+                </div>
+                {lightbox.caption && (
+                  <div className="mt-1 text-neutral-600">{lightbox.caption}</div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setLightbox(null)}
+                className="rounded-md border border-neutral-300 px-3 py-1 hover:bg-neutral-100"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="max-w-6xl mx-auto">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-3">
