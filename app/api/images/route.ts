@@ -23,25 +23,27 @@ export async function POST(req: Request) {
     return authFail;
   }
 
-  let body: {
-    machine_id?: unknown;
-    image_base64?: unknown;
-    content_type?: unknown;
-    caption?: unknown;
-  };
-  try {
-    body = await req.json();
-  } catch {
+  const ct = req.headers.get("content-type") ?? "";
+  if (!ct.toLowerCase().includes("multipart/form-data")) {
     return NextResponse.json(
-      { status: "error", message: "invalid JSON body" },
+      { status: "error", message: "content-type must be multipart/form-data" },
       { status: 400 }
     );
   }
 
-  const machine_id = String(body.machine_id ?? "").trim();
-  let image_base64 = String(body.image_base64 ?? "").trim();
-  let contentType = String(body.content_type ?? "").trim().toLowerCase();
-  const caption = body.caption ? String(body.caption).trim() || null : null;
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    return NextResponse.json(
+      { status: "error", message: "could not parse form data" },
+      { status: 400 }
+    );
+  }
+
+  const file = form.get("image");
+  const machine_id = String(form.get("machine_id") ?? "").trim();
+  const caption = String(form.get("caption") ?? "").trim() || null;
 
   if (!machine_id) {
     return NextResponse.json(
@@ -49,49 +51,29 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
-  if (!image_base64) {
+  if (!(file instanceof File)) {
     return NextResponse.json(
-      { status: "error", message: "image_base64 required" },
+      { status: "error", message: "image field required (file)" },
       { status: 400 }
     );
   }
-
-  // Tolerate data URLs: "data:image/jpeg;base64,AAAA..."
-  const dataUrlMatch = /^data:([\w/.+-]+);base64,(.*)$/i.exec(image_base64);
-  if (dataUrlMatch) {
-    if (!contentType) contentType = dataUrlMatch[1].toLowerCase();
-    image_base64 = dataUrlMatch[2];
+  if (file.size === 0) {
+    return NextResponse.json(
+      { status: "error", message: "image is empty" },
+      { status: 400 }
+    );
   }
-  // Strip whitespace/newlines that sometimes sneak in
-  image_base64 = image_base64.replace(/\s+/g, "");
-
-  if (!contentType) contentType = "image/jpeg"; // default for device cameras
+  if (file.size > MAX_BYTES) {
+    return NextResponse.json(
+      { status: "error", message: `image exceeds max size ${MAX_BYTES} bytes` },
+      { status: 413 }
+    );
+  }
+  const contentType = file.type || "application/octet-stream";
   if (!ALLOWED.has(contentType)) {
     return NextResponse.json(
       { status: "error", message: `unsupported content-type: ${contentType}` },
       { status: 415 }
-    );
-  }
-
-  let bytes: Buffer;
-  try {
-    bytes = Buffer.from(image_base64, "base64");
-  } catch {
-    return NextResponse.json(
-      { status: "error", message: "image_base64 is not valid base64" },
-      { status: 400 }
-    );
-  }
-  if (bytes.length === 0) {
-    return NextResponse.json(
-      { status: "error", message: "decoded image is empty" },
-      { status: 400 }
-    );
-  }
-  if (bytes.length > MAX_BYTES) {
-    return NextResponse.json(
-      { status: "error", message: `image exceeds max size ${MAX_BYTES} bytes` },
-      { status: 413 }
     );
   }
 
@@ -100,6 +82,7 @@ export async function POST(req: Request) {
   const storage_path = `${safeMachine}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
 
   const sb = supabase();
+  const bytes = Buffer.from(await file.arrayBuffer());
 
   const { error: upErr } = await sb.storage
     .from(BUCKET)
@@ -132,14 +115,13 @@ export async function POST(req: Request) {
       storage_path,
       public_url,
       content_type: contentType,
-      size_bytes: bytes.length,
+      size_bytes: file.size,
       caption,
     })
     .select("id, machine_id, storage_path, public_url, content_type, size_bytes, caption, uploaded_at")
     .single();
 
   if (insErr) {
-    // best-effort: remove uploaded blob so we don't leak orphans
     await sb.storage.from(BUCKET).remove([storage_path]);
     logRequest({
       route: "/api/images",
@@ -159,7 +141,7 @@ export async function POST(req: Request) {
     method: "POST",
     status: 200,
     latency_ms: elapsed(),
-    note: `machine=${machine_id} bytes=${bytes.length}`,
+    note: `machine=${machine_id} bytes=${file.size}`,
   });
   return NextResponse.json({ status: "ok", image: row });
 }
