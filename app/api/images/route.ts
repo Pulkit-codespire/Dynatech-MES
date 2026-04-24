@@ -170,6 +170,19 @@ export async function POST(req: Request) {
         threshold_used: 0.6,
         recognized: !!best,
       });
+
+      // Save unmapped face if not recognized
+      if (!best) {
+        const { saveUnmappedFace } = await import("@/lib/unmapped-face");
+        await saveUnmappedFace(
+          sb,
+          descriptor,
+          bytes,
+          machine_id,
+          contentType,
+          row!.id // image already saved
+        );
+      }
     } catch (e) {
       console.error(
         JSON.stringify({

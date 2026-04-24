@@ -48,6 +48,14 @@ type ImagesData = {
   images: ImageRow[];
 };
 
+type UnmappedFace = {
+  embedding_id: string;
+  source_image_id: string | null;
+  image_url: string | null;
+  machine_id: string | null;
+  created_at: string;
+};
+
 type FaceProfile = {
   id: string;
   name: string;
@@ -90,6 +98,12 @@ export default function Dashboard() {
   const [trainStatus, setTrainStatus] = useState<string | null>(null);
   const [trainLoading, setTrainLoading] = useState(false);
   const [deletingProfile, setDeletingProfile] = useState<string | null>(null);
+  const [unmappedFaces, setUnmappedFaces] = useState<UnmappedFace[]>([]);
+  const [mappingId, setMappingId] = useState<string | null>(null);
+  const [mapForm, setMapForm] = useState({ name: "", label: "", employee_id: "" });
+  const [mapLoading, setMapLoading] = useState(false);
+  const [mapStatus, setMapStatus] = useState<string | null>(null);
+  const [dismissingId, setDismissingId] = useState<string | null>(null);
   const flashRef = useRef<Set<string>>(new Set());
   const lastIdsRef = useRef<Set<string>>(new Set());
 
@@ -143,18 +157,31 @@ export default function Dashboard() {
         // silent
       }
     }
+    async function tickUnmapped() {
+      try {
+        const r = await fetch("/api/dashboard/unmapped-faces?limit=50", { cache: "no-store" });
+        const j = await r.json();
+        if (cancelled) return;
+        if (j.status === "ok") setUnmappedFaces(j.unmapped_faces);
+      } catch {
+        // silent
+      }
+    }
     tick();
     tickImages();
     tickFaces();
+    tickUnmapped();
     const id = setInterval(tick, POLL_MS);
     const imgId = setInterval(tickImages, 5000);
     const faceId = setInterval(tickFaces, 10000);
+    const unmappedIntId = setInterval(tickUnmapped, 10000);
     const clockId = setInterval(() => setNow(Date.now()), 1000);
     return () => {
       cancelled = true;
       clearInterval(id);
       clearInterval(imgId);
       clearInterval(faceId);
+      clearInterval(unmappedIntId);
       clearInterval(clockId);
     };
   }, []);
@@ -397,6 +424,186 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      <section className="max-w-6xl mx-auto mb-8">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-3">
+          Unmapped faces ({unmappedFaces.length})
+        </h2>
+        {unmappedFaces.length === 0 ? (
+          <div className="rounded-md border border-neutral-200 bg-white px-4 py-8 text-center text-sm text-neutral-500">
+            No unmapped faces. All detected faces are either recognized or dismissed.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            {unmappedFaces.map((face) => (
+              <div
+                key={face.embedding_id}
+                className="rounded-md border border-amber-200 bg-white overflow-hidden"
+              >
+                {face.image_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={face.image_url}
+                    alt="Unmapped face"
+                    className="w-full h-40 object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-40 bg-neutral-100 flex items-center justify-center text-neutral-400 text-sm">
+                    No image
+                  </div>
+                )}
+                <div className="p-3">
+                  <div className="text-xs text-neutral-500 font-mono mb-2">
+                    {face.machine_id ?? "unknown"} · {fmtAgo(face.created_at, now)}
+                  </div>
+                  {mapStatus && mappingId === face.embedding_id && (
+                    <div
+                      className={`text-xs font-mono mb-2 ${
+                        mapStatus.startsWith("Error") ? "text-red-600" : "text-emerald-600"
+                      }`}
+                    >
+                      {mapStatus}
+                    </div>
+                  )}
+                  {mappingId === face.embedding_id ? (
+                    <form
+                      className="space-y-2"
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (!mapForm.name || !mapForm.label) return;
+                        setMapLoading(true);
+                        setMapStatus(null);
+                        try {
+                          const r = await fetch("/api/faces/map", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              embedding_id: face.embedding_id,
+                              name: mapForm.name,
+                              label: mapForm.label,
+                              employee_id: mapForm.employee_id || undefined,
+                            }),
+                          });
+                          const j = await r.json();
+                          if (j.status === "ok") {
+                            setUnmappedFaces((prev) =>
+                              prev.filter((f) => f.embedding_id !== face.embedding_id)
+                            );
+                            setMappingId(null);
+                            setMapForm({ name: "", label: "", employee_id: "" });
+                            // refresh profiles
+                            const pr = await fetch("/api/faces/profiles", { cache: "no-store" });
+                            const pj = await pr.json();
+                            if (pj.status === "ok") setProfiles(pj.profiles);
+                          } else {
+                            setMapStatus(`Error: ${j.message}`);
+                          }
+                        } catch (err) {
+                          setMapStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+                        } finally {
+                          setMapLoading(false);
+                        }
+                      }}
+                    >
+                      <input
+                        type="text"
+                        value={mapForm.name}
+                        onChange={(e) => setMapForm((f) => ({ ...f, name: e.target.value }))}
+                        placeholder="Name (e.g. Om Sharma)"
+                        className="border border-neutral-300 rounded px-2 py-1 text-sm w-full"
+                        required
+                      />
+                      <input
+                        type="text"
+                        value={mapForm.label}
+                        onChange={(e) =>
+                          setMapForm((f) => ({
+                            ...f,
+                            label: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""),
+                          }))
+                        }
+                        placeholder="Label (e.g. om-sharma)"
+                        className="border border-neutral-300 rounded px-2 py-1 text-sm w-full font-mono"
+                        required
+                      />
+                      <input
+                        type="text"
+                        value={mapForm.employee_id}
+                        onChange={(e) => setMapForm((f) => ({ ...f, employee_id: e.target.value }))}
+                        placeholder="Employee ID (e.g. EMP001)"
+                        className="border border-neutral-300 rounded px-2 py-1 text-sm w-full font-mono"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="submit"
+                          disabled={mapLoading}
+                          className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-neutral-400 text-white text-xs font-medium px-3 py-1 rounded"
+                        >
+                          {mapLoading ? "Saving…" : "Save"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMappingId(null);
+                            setMapForm({ name: "", label: "", employee_id: "" });
+                            setMapStatus(null);
+                          }}
+                          className="border border-neutral-300 hover:bg-neutral-100 text-xs px-3 py-1 rounded"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMappingId(face.embedding_id);
+                          setMapForm({ name: "", label: "", employee_id: "" });
+                          setMapStatus(null);
+                        }}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium px-3 py-1 rounded"
+                      >
+                        Map
+                      </button>
+                      <button
+                        type="button"
+                        disabled={dismissingId === face.embedding_id}
+                        onClick={async () => {
+                          if (!window.confirm("Dismiss this unmapped face?")) return;
+                          setDismissingId(face.embedding_id);
+                          try {
+                            const r = await fetch(
+                              `/api/dashboard/unmapped-faces?id=${encodeURIComponent(face.embedding_id)}`,
+                              { method: "DELETE" }
+                            );
+                            const j = await r.json();
+                            if (j.status === "ok") {
+                              setUnmappedFaces((prev) =>
+                                prev.filter((f) => f.embedding_id !== face.embedding_id)
+                              );
+                            } else {
+                              setErr(`Dismiss failed: ${j.message}`);
+                            }
+                          } catch (e) {
+                            setErr(e instanceof Error ? e.message : String(e));
+                          } finally {
+                            setDismissingId(null);
+                          }
+                        }}
+                        className="border border-neutral-300 hover:bg-neutral-100 text-xs px-3 py-1 rounded disabled:opacity-50"
+                      >
+                        {dismissingId === face.embedding_id ? "Dismissing…" : "Dismiss"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <section className="max-w-6xl mx-auto mb-8">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-3">

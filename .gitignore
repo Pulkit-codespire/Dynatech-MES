@@ -9,6 +9,3 @@ out
 .vercel
 next-env.d.ts.bak
 tsconfig.tsbuildinfo
-
-# Face recognition model weights (large binaries)
-/models/

@@ -53,11 +53,13 @@ CREATE TABLE IF NOT EXISTS face_profiles (
 );
 
 -- Face embeddings: multiple training samples per profile
+-- profile_id is nullable: NULL = unmapped (unrecognized) face
 CREATE TABLE IF NOT EXISTS face_embeddings (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  profile_id      UUID NOT NULL REFERENCES face_profiles(id) ON DELETE CASCADE,
+  profile_id      UUID REFERENCES face_profiles(id) ON DELETE CASCADE,
   embedding       vector(128) NOT NULL,
   source_image_id UUID REFERENCES machine_images(id) ON DELETE SET NULL,
+  machine_id      TEXT,
   created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -66,6 +68,13 @@ CREATE INDEX IF NOT EXISTS idx_face_embeddings_profile
 
 CREATE INDEX IF NOT EXISTS idx_face_embeddings_hnsw
   ON face_embeddings USING hnsw (embedding vector_cosine_ops);
+
+CREATE INDEX IF NOT EXISTS idx_face_embeddings_unmapped
+  ON face_embeddings(created_at DESC) WHERE profile_id IS NULL;
+
+-- Migration for existing tables (run in SQL editor):
+--   ALTER TABLE face_embeddings ALTER COLUMN profile_id DROP NOT NULL;
+--   ALTER TABLE face_embeddings ADD COLUMN IF NOT EXISTS machine_id TEXT;
 
 -- Recognition log: every recognition attempt
 CREATE TABLE IF NOT EXISTS face_recognition_log (

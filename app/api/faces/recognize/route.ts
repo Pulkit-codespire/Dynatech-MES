@@ -125,7 +125,22 @@ export async function POST(req: Request) {
   });
 
   if (!recognized) {
-    return NextResponse.json({ status: "ok", recognized: false, confidence: 0 });
+    // Save unmapped face for later mapping from dashboard
+    const { saveUnmappedFace } = await import("@/lib/unmapped-face");
+    const unmappedId = await saveUnmappedFace(
+      sb,
+      descriptor,
+      imageBuffer,
+      machine_id,
+      file.type || "image/jpeg"
+    );
+
+    return NextResponse.json({
+      status: "ok",
+      recognized: false,
+      confidence: 0,
+      unmapped_face_id: unmappedId,
+    });
   }
 
   return NextResponse.json({
