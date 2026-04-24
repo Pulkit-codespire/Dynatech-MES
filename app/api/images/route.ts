@@ -143,6 +143,44 @@ export async function POST(req: Request) {
     latency_ms: elapsed(),
     note: `machine=${machine_id} bytes=${file.size}`,
   });
+
+  // Fire-and-forget face recognition (non-blocking)
+  void (async () => {
+    try {
+      const { count } = await sb
+        .from("face_embeddings")
+        .select("id", { count: "exact", head: true });
+      if (!count || count === 0) return;
+
+      const { extractDescriptor, descriptorToArray } = await import("@/lib/face");
+      const descriptor = await extractDescriptor(bytes);
+      if (!descriptor) return;
+
+      const { data: matches } = await sb.rpc("match_face", {
+        query_embedding: JSON.stringify(descriptorToArray(descriptor)),
+        match_threshold: 0.6,
+        match_count: 1,
+      });
+
+      const best = matches?.[0] ?? null;
+      await sb.from("face_recognition_log").insert({
+        image_id: row!.id,
+        matched_profile_id: best?.profile_id ?? null,
+        confidence: best?.similarity ?? 0,
+        threshold_used: 0.6,
+        recognized: !!best,
+      });
+    } catch (e) {
+      console.error(
+        JSON.stringify({
+          t: new Date().toISOString(),
+          route: "/api/images",
+          note: `face recognition error: ${String(e)}`,
+        })
+      );
+    }
+  })();
+
   return NextResponse.json({ status: "ok", image: row });
 }
 

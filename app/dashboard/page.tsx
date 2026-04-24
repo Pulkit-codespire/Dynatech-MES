@@ -38,12 +38,24 @@ type ImageRow = {
   size_bytes: number | null;
   caption: string | null;
   uploaded_at: string;
+  recognized_name?: string | null;
+  recognition_confidence?: number | null;
 };
 
 type ImagesData = {
   status: "ok" | "error";
   server_time: string;
   images: ImageRow[];
+};
+
+type FaceProfile = {
+  id: string;
+  name: string;
+  label: string;
+  employee_id: string | null;
+  notes: string | null;
+  created_at: string;
+  embedding_count: number;
 };
 
 const POLL_MS = 2000;
@@ -72,6 +84,12 @@ export default function Dashboard() {
   const [images, setImages] = useState<ImageRow[]>([]);
   const [lightbox, setLightbox] = useState<ImageRow | null>(null);
   const [deletingImage, setDeletingImage] = useState<string | null>(null);
+  const [profiles, setProfiles] = useState<FaceProfile[]>([]);
+  const [trainForm, setTrainForm] = useState({ name: "", label: "", employee_id: "" });
+  const [trainFile, setTrainFile] = useState<File | null>(null);
+  const [trainStatus, setTrainStatus] = useState<string | null>(null);
+  const [trainLoading, setTrainLoading] = useState(false);
+  const [deletingProfile, setDeletingProfile] = useState<string | null>(null);
   const flashRef = useRef<Set<string>>(new Set());
   const lastIdsRef = useRef<Set<string>>(new Set());
 
@@ -115,15 +133,28 @@ export default function Dashboard() {
         // silent; image feed is non-critical
       }
     }
+    async function tickFaces() {
+      try {
+        const r = await fetch("/api/faces/profiles", { cache: "no-store" });
+        const j = await r.json();
+        if (cancelled) return;
+        if (j.status === "ok") setProfiles(j.profiles);
+      } catch {
+        // silent
+      }
+    }
     tick();
     tickImages();
+    tickFaces();
     const id = setInterval(tick, POLL_MS);
     const imgId = setInterval(tickImages, 5000);
+    const faceId = setInterval(tickFaces, 10000);
     const clockId = setInterval(() => setNow(Date.now()), 1000);
     return () => {
       cancelled = true;
       clearInterval(id);
       clearInterval(imgId);
+      clearInterval(faceId);
       clearInterval(clockId);
     };
   }, []);
@@ -274,6 +305,16 @@ export default function Dashboard() {
                     className="w-full h-full object-cover"
                   />
                 </button>
+                {img.recognized_name && (
+                  <div className="absolute top-1 left-1 bg-emerald-600/90 text-white text-[9px] font-semibold px-1.5 py-0.5 rounded pointer-events-none">
+                    {img.recognized_name}
+                    {img.recognition_confidence != null && (
+                      <span className="ml-1 opacity-75">
+                        {(img.recognition_confidence * 100).toFixed(0)}%
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-1 text-[10px] text-white font-mono pointer-events-none">
                   <div className="truncate">{img.machine_id}</div>
                   <div className="text-white/70">{fmtAgo(img.uploaded_at, now)}</div>
@@ -337,6 +378,13 @@ export default function Dashboard() {
                 {lightbox.caption && (
                   <div className="mt-1 text-neutral-600">{lightbox.caption}</div>
                 )}
+                {lightbox.recognized_name && (
+                  <div className="mt-1 text-emerald-600 font-semibold">
+                    Recognized: {lightbox.recognized_name}
+                    {lightbox.recognition_confidence != null &&
+                      ` (${(lightbox.recognition_confidence * 100).toFixed(1)}%)`}
+                  </div>
+                )}
               </div>
               <button
                 type="button"
@@ -349,6 +397,164 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      <section className="max-w-6xl mx-auto mb-8">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-3">
+          Face training
+        </h2>
+        <div className="rounded-md border border-neutral-200 bg-white p-4">
+          <form
+            className="flex flex-wrap items-end gap-3 mb-4"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!trainFile || !trainForm.name || !trainForm.label) return;
+              setTrainLoading(true);
+              setTrainStatus(null);
+              try {
+                const fd = new FormData();
+                fd.append("image", trainFile);
+                fd.append("name", trainForm.name);
+                fd.append("label", trainForm.label);
+                if (trainForm.employee_id) fd.append("employee_id", trainForm.employee_id);
+                const r = await fetch("/api/faces/train", { method: "POST", body: fd });
+                const j = await r.json();
+                if (j.status === "ok") {
+                  setTrainStatus(`Trained "${trainForm.name}" (${trainForm.label})`);
+                  setTrainForm({ name: "", label: "", employee_id: "" });
+                  setTrainFile(null);
+                  const inp = document.getElementById("train-file-input") as HTMLInputElement | null;
+                  if (inp) inp.value = "";
+                  // refresh profiles
+                  const pr = await fetch("/api/faces/profiles", { cache: "no-store" });
+                  const pj = await pr.json();
+                  if (pj.status === "ok") setProfiles(pj.profiles);
+                } else {
+                  setTrainStatus(`Error: ${j.message}`);
+                }
+              } catch (err) {
+                setTrainStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+              } finally {
+                setTrainLoading(false);
+              }
+            }}
+          >
+            <div>
+              <label className="block text-xs font-medium text-neutral-600 mb-1">Name</label>
+              <input
+                type="text"
+                value={trainForm.name}
+                onChange={(e) => setTrainForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="Alice Johnson"
+                className="border border-neutral-300 rounded px-2 py-1.5 text-sm w-40"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-neutral-600 mb-1">Label (slug)</label>
+              <input
+                type="text"
+                value={trainForm.label}
+                onChange={(e) =>
+                  setTrainForm((f) => ({
+                    ...f,
+                    label: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""),
+                  }))
+                }
+                placeholder="alice"
+                className="border border-neutral-300 rounded px-2 py-1.5 text-sm w-32 font-mono"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-neutral-600 mb-1">Employee ID</label>
+              <input
+                type="text"
+                value={trainForm.employee_id}
+                onChange={(e) => setTrainForm((f) => ({ ...f, employee_id: e.target.value }))}
+                placeholder="EMP001"
+                className="border border-neutral-300 rounded px-2 py-1.5 text-sm w-28 font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-neutral-600 mb-1">Face image</label>
+              <input
+                id="train-file-input"
+                type="file"
+                accept="image/*"
+                onChange={(e) => setTrainFile(e.target.files?.[0] ?? null)}
+                className="text-sm"
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={trainLoading}
+              className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-neutral-400 text-white text-sm font-medium px-4 py-1.5 rounded"
+            >
+              {trainLoading ? "Training…" : "Add face"}
+            </button>
+          </form>
+          {trainStatus && (
+            <div
+              className={`text-xs font-mono mb-3 ${
+                trainStatus.startsWith("Error") ? "text-red-600" : "text-emerald-600"
+              }`}
+            >
+              {trainStatus}
+            </div>
+          )}
+          {profiles.length > 0 && (
+            <div className="border-t border-neutral-200 pt-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+                Trained profiles ({profiles.length})
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                {profiles.map((p) => (
+                  <div
+                    key={p.id}
+                    className="group flex items-center justify-between border border-neutral-200 rounded px-3 py-2"
+                  >
+                    <div>
+                      <div className="text-sm font-medium">{p.name}</div>
+                      <div className="text-xs text-neutral-500 font-mono">
+                        {p.label}{p.employee_id ? ` · ${p.employee_id}` : ""} · {p.embedding_count} embedding{p.embedding_count !== 1 ? "s" : ""}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={deletingProfile === p.id}
+                      onClick={async () => {
+                        if (!window.confirm(`Delete profile "${p.name}" and all its embeddings?`)) return;
+                        setDeletingProfile(p.id);
+                        try {
+                          const r = await fetch(
+                            `/api/faces/profiles?id=${encodeURIComponent(p.id)}`,
+                            { method: "DELETE" }
+                          );
+                          const j = await r.json();
+                          if (j.status === "ok") {
+                            setProfiles((prev) => prev.filter((x) => x.id !== p.id));
+                          } else {
+                            setErr(`Delete failed: ${j.message}`);
+                          }
+                        } catch (e) {
+                          setErr(e instanceof Error ? e.message : String(e));
+                        } finally {
+                          setDeletingProfile(null);
+                        }
+                      }}
+                      className="opacity-0 group-hover:opacity-100 text-neutral-400 hover:text-red-600 text-lg leading-none disabled:cursor-not-allowed transition-opacity"
+                      title="Delete profile"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
 
       <section className="max-w-6xl mx-auto">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-3">

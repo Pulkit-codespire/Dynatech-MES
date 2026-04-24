@@ -25,10 +25,50 @@ export async function GET(req: Request) {
     );
   }
 
+  // Enrich with recognition data
+  const imageIds = (data ?? []).map((d) => d.id);
+  let recognitionMap = new Map<string, { name: string; confidence: number }>();
+
+  if (imageIds.length > 0) {
+    const { data: logs } = await sb
+      .from("face_recognition_log")
+      .select("image_id, confidence, recognized, matched_profile_id")
+      .in("image_id", imageIds)
+      .eq("recognized", true);
+
+    if (logs && logs.length > 0) {
+      const profileIds = [...new Set(logs.map((l) => l.matched_profile_id).filter(Boolean))];
+      const { data: profiles } = await sb
+        .from("face_profiles")
+        .select("id, name")
+        .in("id", profileIds);
+
+      const profileMap = new Map((profiles ?? []).map((p) => [p.id, p.name]));
+
+      for (const log of logs) {
+        if (log.matched_profile_id && !recognitionMap.has(log.image_id)) {
+          recognitionMap.set(log.image_id, {
+            name: profileMap.get(log.matched_profile_id) ?? "Unknown",
+            confidence: log.confidence,
+          });
+        }
+      }
+    }
+  }
+
+  const images = (data ?? []).map((d) => {
+    const rec = recognitionMap.get(d.id);
+    return {
+      ...d,
+      recognized_name: rec?.name ?? null,
+      recognition_confidence: rec?.confidence ?? null,
+    };
+  });
+
   return NextResponse.json({
     status: "ok",
     server_time: new Date().toISOString(),
-    images: data ?? [],
+    images,
   });
 }
 
