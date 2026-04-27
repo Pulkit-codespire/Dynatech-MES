@@ -6,11 +6,17 @@ CREATE TABLE IF NOT EXISTS events (
   event_type   TEXT NOT NULL,
   timestamp    TIMESTAMPTZ NOT NULL,
   payload      JSONB DEFAULT '{}'::jsonb,
-  received_at  TIMESTAMPTZ DEFAULT NOW()
+  received_at  TIMESTAMPTZ DEFAULT NOW(),
+  voided       BOOLEAN DEFAULT FALSE,
+  edited_by    TEXT,
+  edit_reason  TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_machine_time
   ON events(machine_id, timestamp DESC);
+
+CREATE INDEX IF NOT EXISTS idx_events_voided
+  ON events(machine_id, event_type, timestamp DESC) WHERE voided = FALSE;
 
 -- Machine images: metadata table. Binary goes to the `machine-images`
 -- Storage bucket; this row stores the path + derived public URL.

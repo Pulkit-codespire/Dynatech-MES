@@ -14,6 +14,22 @@ export const BatchSchema = z.object({
   events: z.array(EventSchema).min(1).max(500),
 });
 
+// Part change notification
+export const PartChangeSchema = z.object({
+  machine_id: z.string().min(1).max(64),
+  operator_id: z.string().min(1).max(64),
+  part_number: z.string().min(1).max(64),
+  timestamp: z.string().datetime({ offset: true }),
+});
+
+// Edit/void event
+export const EditEventSchema = z.object({
+  reason: z.string().min(1).max(128).optional(),
+  voided: z.boolean().optional(),
+  edited_by: z.string().min(1).max(64),
+  edit_reason: z.string().max(255).optional(),
+});
+
 // Face training
 export const TrainFaceSchema = z.object({
   name: z.string().min(1).max(64),
