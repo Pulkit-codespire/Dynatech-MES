@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { checkApiKey } from "@/lib/auth";
 import { logRequest, startTimer } from "@/lib/logger";
-import { extractDescriptor, descriptorToArray } from "@/lib/face";
-
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -100,6 +98,7 @@ export async function POST(req: Request) {
   const savedImage = await saveImage(sb, imageBuffer, machine_id, contentType);
 
   // Try face detection
+  const { extractDescriptor, descriptorToArray } = await import("@/lib/face");
   let descriptor: Float32Array | null;
   try {
     descriptor = await extractDescriptor(imageBuffer);

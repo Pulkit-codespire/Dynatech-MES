@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { logRequest, startTimer } from "@/lib/logger";
 import { TrainFaceSchema } from "@/lib/validation";
-import { extractDescriptor, descriptorToArray } from "@/lib/face";
-
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -58,6 +56,7 @@ export async function POST(req: Request) {
 
   const imageBuffer = Buffer.from(await file.arrayBuffer());
 
+  const { extractDescriptor, descriptorToArray } = await import("@/lib/face");
   let descriptor: Float32Array | null;
   try {
     descriptor = await extractDescriptor(imageBuffer);

@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { logRequest, startTimer } from "@/lib/logger";
-import { extractDescriptor, descriptorToArray } from "@/lib/face";
-
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -116,6 +114,7 @@ export async function POST(req: Request) {
   }
 
   // Process each image: download from storage → extract descriptor → store embedding
+  const { extractDescriptor, descriptorToArray } = await import("@/lib/face");
   const results: TrainResult[] = [];
 
   for (const img of pendingImages) {
