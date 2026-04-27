@@ -8,16 +8,15 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "postinstall": "node scripts/patch-tfjs-node.js"
+    "postinstall": "node scripts/download-face-models.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
-    "@tensorflow/tfjs": "^4.22.0",
-    "@vladmandic/face-api": "^1.7.15",
-    "canvas": "^3.2.3",
     "next": "15.5.15",
+    "onnxruntime-node": "^1.24.3",
     "react": "19.0.0",
     "react-dom": "19.0.0",
+    "sharp": "^0.34.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {

@@ -2,12 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  serverExternalPackages: [
-    "@tensorflow/tfjs",
-    "@tensorflow/tfjs-node",
-    "@vladmandic/face-api",
-    "canvas",
-  ],
+  serverExternalPackages: ["onnxruntime-node", "sharp"],
+  outputFileTracingIncludes: { "/api/*": ["./models/**/*"] },
 };
 
 export default nextConfig;

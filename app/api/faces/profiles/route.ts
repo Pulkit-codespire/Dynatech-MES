@@ -19,21 +19,24 @@ export async function GET() {
     );
   }
 
-  // Count embeddings per profile
-  const { data: counts } = await sb
-    .from("face_embeddings")
-    .select("profile_id")
-    .then(async ({ data }) => {
-      const map = new Map<string, number>();
-      for (const row of data ?? []) {
-        map.set(row.profile_id, (map.get(row.profile_id) ?? 0) + 1);
-      }
-      return { data: map };
-    });
+  // Count embeddings per profile (filtered to existing profiles only)
+  const profileIds = (profiles ?? []).map((p) => p.id);
+  const countMap = new Map<string, number>();
+
+  if (profileIds.length > 0) {
+    const { data: embeddings } = await sb
+      .from("face_embeddings")
+      .select("profile_id")
+      .in("profile_id", profileIds);
+
+    for (const row of embeddings ?? []) {
+      countMap.set(row.profile_id, (countMap.get(row.profile_id) ?? 0) + 1);
+    }
+  }
 
   const result = (profiles ?? []).map((p) => ({
     ...p,
-    embedding_count: counts?.get(p.id) ?? 0,
+    embedding_count: countMap.get(p.id) ?? 0,
   }));
 
   return NextResponse.json({ status: "ok", profiles: result });

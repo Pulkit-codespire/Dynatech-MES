@@ -36,6 +36,89 @@ CREATE INDEX IF NOT EXISTS idx_machine_images_machine
 --   Public: yes (so <img src> works without signed URLs)
 
 -- ═══════════════════════════════════════════════════════════════════════
+-- Operators
+-- ═══════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS operators (
+  id          TEXT PRIMARY KEY,           -- e.g. 'OP-RK-042'
+  name        TEXT NOT NULL,
+  pin_hash    TEXT NOT NULL,              -- bcrypt or plain for dev
+  role        TEXT NOT NULL CHECK (role IN ('operator','setter','supervisor')),
+  active      BOOLEAN DEFAULT TRUE,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- Machines
+-- ═══════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS machines (
+  machine_id          TEXT PRIMARY KEY,           -- e.g. 'JYOTI-01'
+  name                TEXT NOT NULL,
+  shifts              JSONB NOT NULL DEFAULT '{}',
+  lunch               TEXT,
+  breakdown_reasons   JSONB NOT NULL DEFAULT '["Tool broke","Material issue","Awaiting setup","Power/utility","Coolant/fluid","Other"]',
+  reject_reasons      JSONB NOT NULL DEFAULT '["Dimension out","Surface finish","Dent/scratch","Plating defect","Other"]',
+  lu_overtime_ms      INTEGER NOT NULL DEFAULT 60000,   -- L/U overtime threshold (ms)
+  beep_repeat_ms      INTEGER NOT NULL DEFAULT 10000,   -- overtime beep repeat interval (ms)
+  capture_seconds     INTEGER NOT NULL DEFAULT 5,       -- reject photo capture countdown (s)
+  active              BOOLEAN DEFAULT TRUE,
+  created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- Parts
+-- ═══════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS parts (
+  part_number   TEXT PRIMARY KEY,          -- e.g. 'DT-4521-A'
+  description   TEXT NOT NULL,
+  setup         TEXT,
+  target_secs   INTEGER NOT NULL,          -- target cycle time in seconds
+  machine_id    TEXT REFERENCES machines(machine_id),
+  active        BOOLEAN DEFAULT TRUE,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_parts_machine
+  ON parts(machine_id) WHERE active = TRUE;
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- Auth sessions (login tracking)
+-- ═══════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  operator_id  TEXT NOT NULL REFERENCES operators(id),
+  machine_id   TEXT NOT NULL REFERENCES machines(machine_id),
+  shift        TEXT NOT NULL,
+  logged_in_at TIMESTAMPTZ DEFAULT NOW(),
+  logged_out_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_machine
+  ON auth_sessions(machine_id, logged_in_at DESC);
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- Operator Assignments (supervisor assigns operator → machine + part)
+-- ═══════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS operator_assignments (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  operator_id   TEXT NOT NULL REFERENCES operators(id),
+  machine_id    TEXT NOT NULL REFERENCES machines(machine_id),
+  part_number   TEXT NOT NULL REFERENCES parts(part_number),
+  assigned_by   TEXT REFERENCES operators(id),
+  assigned_at   TIMESTAMPTZ DEFAULT NOW(),
+  active        BOOLEAN DEFAULT TRUE
+);
+
+-- Only one active assignment per operator at a time
+CREATE UNIQUE INDEX IF NOT EXISTS idx_operator_assignments_active
+  ON operator_assignments(operator_id) WHERE active = TRUE;
+
+-- ═══════════════════════════════════════════════════════════════════════
 -- Face Recognition (requires pgvector extension)
 -- ═══════════════════════════════════════════════════════════════════════
 
@@ -57,7 +140,7 @@ CREATE TABLE IF NOT EXISTS face_profiles (
 CREATE TABLE IF NOT EXISTS face_embeddings (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   profile_id      UUID REFERENCES face_profiles(id) ON DELETE CASCADE,
-  embedding       vector(128) NOT NULL,
+  embedding       vector(512) NOT NULL,
   source_image_id UUID REFERENCES machine_images(id) ON DELETE SET NULL,
   machine_id      TEXT,
   created_at      TIMESTAMPTZ DEFAULT NOW()
@@ -95,7 +178,7 @@ CREATE INDEX IF NOT EXISTS idx_recognition_log_time
 DROP FUNCTION IF EXISTS match_face(vector, real, integer);
 
 CREATE OR REPLACE FUNCTION match_face(
-  query_embedding vector(128),
+  query_embedding vector(512),
   match_threshold REAL DEFAULT 0.6,
   match_count     INT  DEFAULT 1
 )
